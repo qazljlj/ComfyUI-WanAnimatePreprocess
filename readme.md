@@ -3,6 +3,17 @@
 
 Nodes to run the ViTPose model, get face crops and keypoint list for SAM2 segmentation.
 
+`PoseAndFaceDetection` now also includes an optional MediaPipe multiclass segmentation path that can output `mediapipe_bbox` prompts for SAM2. The MediaPipe classes are exposed as node parameters so you can enable any combination of:
+
+- `0 - background`
+- `1 - hair`
+- `2 - body-skin`
+- `3 - face-skin`
+- `4 - clothes`
+- `5 - others (accessories)`
+
+When enabled, the node downloads the official `selfie_multiclass_256x256.tflite` model automatically and returns a combined `XYXY` prompt box in `mediapipe_bbox` by merging the selected classes from the first frame. This keeps the output compatible with SAM2 video workflows.
+
 Models:
 
 to `ComfyUI/models/detection` (subject to change in the future)

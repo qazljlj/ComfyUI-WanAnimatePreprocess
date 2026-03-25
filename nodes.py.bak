@@ -20,7 +20,6 @@ from .pose_utils.pose2d_utils import load_pose_metas_from_kp2ds_seq, crop, bbox_
 from .utils import get_face_bboxes, padding_resize, resize_by_area, resize_to_bounds
 from .pose_utils.human_visualization import AAPoseMeta, draw_aapose_by_meta_new
 from .retarget_pose import get_retarget_pose
-from .mediapipe_bbox import generate_mediapipe_bboxes
 
 class OnnxDetectionModelLoader:
     @classmethod
@@ -67,42 +66,16 @@ class PoseAndFaceDetection:
             "optional": {
                 "retarget_image": ("IMAGE", {"default": None, "tooltip": "Optional reference image for pose retargeting"}),
                 "face_padding": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "When > 0, the detected face images are padded and resized to 512x512"}),
-                "use_mediapipe_bbox": ("BOOLEAN", {"default": False, "tooltip": "Enable MediaPipe multiclass segmentation to generate bbox prompts for SAM2"}),
-                "mediapipe_0_background": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 0 - background"}),
-                "mediapipe_1_hair": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 1 - hair"}),
-                "mediapipe_2_body_skin": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 2 - body-skin"}),
-                "mediapipe_3_face_skin": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 3 - face-skin"}),
-                "mediapipe_4_clothes": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 4 - clothes"}),
-                "mediapipe_5_others": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 5 - others (accessories)"}),
-                "mediapipe_confidence_threshold": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Confidence threshold used to turn MediaPipe masks into binary regions"}),
-                "mediapipe_mask_dilation": ("INT", {"default": 0, "min": -64, "max": 64, "step": 1, "tooltip": "Dilate (>0) or erode (<0) MediaPipe masks before extracting bboxes"}),
             },
         }
 
-    RETURN_TYPES = ("POSEDATA", "IMAGE", "STRING", "BBOX", "BBOX,", "BBOX")
-    RETURN_NAMES = ("pose_data", "face_images", "key_frame_body_points", "bboxes", "face_bboxes", "mediapipe_bbox")
+    RETURN_TYPES = ("POSEDATA", "IMAGE", "STRING", "BBOX", "BBOX,")
+    RETURN_NAMES = ("pose_data", "face_images", "key_frame_body_points", "bboxes", "face_bboxes")
     FUNCTION = "process"
     CATEGORY = "WanAnimatePreprocess"
     DESCRIPTION = "Detects human poses and face images from input images. Optionally retargets poses based on a reference image."
 
-    def process(
-        self,
-        model,
-        images,
-        width,
-        height,
-        retarget_image=None,
-        face_padding=0,
-        use_mediapipe_bbox=False,
-        mediapipe_0_background=False,
-        mediapipe_1_hair=False,
-        mediapipe_2_body_skin=False,
-        mediapipe_3_face_skin=False,
-        mediapipe_4_clothes=False,
-        mediapipe_5_others=False,
-        mediapipe_confidence_threshold=0.25,
-        mediapipe_mask_dilation=0,
-    ):
+    def process(self, model, images, width, height, retarget_image=None, face_padding=0):
         detector = model["yolo"]
         pose_model = model["vitpose"]
         B, H, W, C = images.shape
@@ -245,32 +218,7 @@ class PoseAndFaceDetection:
             "pose_metas_original": pose_metas,
         }
 
-        mediapipe_bbox = []
-        if use_mediapipe_bbox:
-            enabled_class_ids = []
-            if mediapipe_0_background:
-                enabled_class_ids.append(0)
-            if mediapipe_1_hair:
-                enabled_class_ids.append(1)
-            if mediapipe_2_body_skin:
-                enabled_class_ids.append(2)
-            if mediapipe_3_face_skin:
-                enabled_class_ids.append(3)
-            if mediapipe_4_clothes:
-                enabled_class_ids.append(4)
-            if mediapipe_5_others:
-                enabled_class_ids.append(5)
-
-            mediapipe_bbox = generate_mediapipe_bboxes(
-                images_np,
-                enabled_class_ids=enabled_class_ids,
-                confidence_threshold=mediapipe_confidence_threshold,
-                mask_dilation=mediapipe_mask_dilation,
-            )
-            if not mediapipe_bbox:
-                mediapipe_bbox = [bbox_ints]
-
-        return (pose_data, face_images_tensor, json.dumps(points_dict_list), [bbox_ints], face_bboxes, mediapipe_bbox)
+        return (pose_data, face_images_tensor, json.dumps(points_dict_list), [bbox_ints], face_bboxes)
 
 class DrawViTPose:
     @classmethod
