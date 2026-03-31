@@ -27,9 +27,9 @@ class OnnxDetectionModelLoader:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "vitpose_model": (folder_paths.get_filename_list("detection"), {"tooltip": "These models are loaded from the 'ComfyUI/models/detection' -folder",}),
-                "yolo_model": (folder_paths.get_filename_list("detection"), {"tooltip": "These models are loaded from the 'ComfyUI/models/detection' -folder",}),
-                "onnx_device": (["CUDAExecutionProvider", "CPUExecutionProvider"], {"default": "CUDAExecutionProvider", "tooltip": "Device to run the ONNX models on"}),
+                "vitpose_model": (folder_paths.get_filename_list("detection"), {"tooltip": "这些模型从 'ComfyUI/models/detection' 文件夹加载。",}),
+                "yolo_model": (folder_paths.get_filename_list("detection"), {"tooltip": "这些模型从 'ComfyUI/models/detection' 文件夹加载。",}),
+                "onnx_device": (["CUDAExecutionProvider", "CPUExecutionProvider"], {"default": "CUDAExecutionProvider", "tooltip": "用于运行 ONNX 模型的设备。"}),
             },
         }
 
@@ -61,26 +61,26 @@ class PoseAndFaceDetection:
             "required": {
                 "model": ("POSEMODEL",),
                 "images": ("IMAGE",),
-                "width": ("INT", {"default": 832, "min": 64, "max": 2048, "step": 1, "tooltip": "Width of the generation"}),
-                "height": ("INT", {"default": 480, "min": 64, "max": 2048, "step": 1, "tooltip": "Height of the generation"}),
+                "width": ("INT", {"default": 832, "min": 64, "max": 2048, "step": 1, "tooltip": "生成结果的宽度。"}),
+                "height": ("INT", {"default": 480, "min": 64, "max": 2048, "step": 1, "tooltip": "生成结果的高度。"}),
             },
             "optional": {
-                "retarget_image": ("IMAGE", {"default": None, "tooltip": "Optional reference image for pose retargeting"}),
-                "face_padding": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "When > 0, the detected face images are padded and resized to 512x512"}),
-                "use_mediapipe_bbox": ("BOOLEAN", {"default": False, "tooltip": "Enable MediaPipe multiclass segmentation to generate bbox prompts for SAM2"}),
-                "mediapipe_0_background": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 0 - background"}),
-                "mediapipe_1_hair": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 1 - hair"}),
-                "mediapipe_2_body_skin": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 2 - body-skin"}),
-                "mediapipe_3_face_skin": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 3 - face-skin"}),
-                "mediapipe_4_clothes": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 4 - clothes"}),
-                "mediapipe_5_others": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe class 5 - others (accessories)"}),
-                "mediapipe_confidence_threshold": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Confidence threshold used to turn MediaPipe masks into binary regions"}),
-                "mediapipe_mask_dilation": ("INT", {"default": 0, "min": -64, "max": 64, "step": 1, "tooltip": "Dilate (>0) or erode (<0) MediaPipe masks before extracting bboxes"}),
+                "retarget_image": ("IMAGE", {"default": None, "tooltip": "用于姿态重定向的可选参考图像。"}),
+                "face_padding": ("INT", {"default": 0, "min": 0, "max": 512, "step": 1, "tooltip": "大于 0 时，对检测到的人脸区域扩边后再缩放到 512x512。"}),
+                "use_mediapipe_bbox": ("BOOLEAN", {"default": False, "tooltip": "启用 MediaPipe 多类别分割，用于生成 SAM2 的 bbox 提示。"}),
+                "mediapipe_0_background": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe 类别 0：背景。"}),
+                "mediapipe_1_hair": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe 类别 1：头发。"}),
+                "mediapipe_2_body_skin": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe 类别 2：身体皮肤。"}),
+                "mediapipe_3_face_skin": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe 类别 3：面部皮肤。"}),
+                "mediapipe_4_clothes": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe 类别 4：衣物。"}),
+                "mediapipe_5_others": ("BOOLEAN", {"default": False, "tooltip": "MediaPipe 类别 5：其他（配饰等）。"}),
+                "mediapipe_confidence_threshold": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "将 MediaPipe 置信度图转为二值区域时使用的阈值。"}),
+                "mediapipe_mask_dilation": ("INT", {"default": 0, "min": -64, "max": 64, "step": 1, "tooltip": "提取 bbox 前对 mask 做形态学处理：大于 0 为膨胀，小于 0 为腐蚀。"}),
             },
         }
 
-    RETURN_TYPES = ("POSEDATA", "IMAGE", "STRING", "BBOX", "BBOX,", "BBOX")
-    RETURN_NAMES = ("pose_data", "face_images", "key_frame_body_points", "bboxes", "face_bboxes", "mediapipe_bbox")
+    RETURN_TYPES = ("POSEDATA", "IMAGE", "STRING", "BBOX", "BBOX", "BBOX", "INT")
+    RETURN_NAMES = ("pose_data", "face_images", "key_frame_body_points", "bboxes", "face_bboxes", "mediapipe_bbox", "mediapipe_bbox_frame_idx")
     FUNCTION = "process"
     CATEGORY = "WanAnimatePreprocess"
     DESCRIPTION = "Detects human poses and face images from input images. Optionally retargets poses based on a reference image."
@@ -173,9 +173,32 @@ class PoseAndFaceDetection:
         kp2ds = np.concatenate(kp2ds, 0)
         pose_metas = load_pose_metas_from_kp2ds_seq(kp2ds, width=W, height=H)
 
+        def has_valid_face(meta, min_confidence=0.35, min_visible_points=5):
+            keypoints_face = np.asarray(meta.get("keypoints_face", []))
+            if keypoints_face.ndim != 2 or keypoints_face.shape[0] == 0:
+                return False
+            if keypoints_face.shape[1] < 3:
+                return False
+            conf = keypoints_face[:, 2]
+            x = keypoints_face[:, 0]
+            y = keypoints_face[:, 1]
+            visible = (conf >= min_confidence) & (x >= 0.0) & (x <= 1.0) & (y >= 0.0) & (y <= 1.0)
+            return int(np.count_nonzero(visible)) >= min_visible_points
+
+        first_valid_face_idx = None
+        for idx, meta in enumerate(pose_metas):
+            if has_valid_face(meta):
+                first_valid_face_idx = idx
+                break
+
+        if first_valid_face_idx is None:
+            logging.warning("No valid face found in sequence. Falling back to frame 0 for face outputs.")
+            first_valid_face_idx = 0
+
         face_images = []
         face_bboxes = []
-        for idx, meta in enumerate(pose_metas):
+        for idx in range(first_valid_face_idx, len(pose_metas)):
+            meta = pose_metas[idx]
             face_bbox_for_image = get_face_bboxes(meta['keypoints_face'][:, :2], scale=1.3, image_shape=(H, W))
             x1, x2, y1, y2 = face_bbox_for_image
             if face_padding > 0:
@@ -246,6 +269,7 @@ class PoseAndFaceDetection:
         }
 
         mediapipe_bbox = []
+        mediapipe_bbox_frame_idx = -1
         if use_mediapipe_bbox:
             enabled_class_ids = []
             if mediapipe_0_background:
@@ -261,16 +285,21 @@ class PoseAndFaceDetection:
             if mediapipe_5_others:
                 enabled_class_ids.append(5)
 
-            mediapipe_bbox = generate_mediapipe_bboxes(
-                images_np,
+            images_for_mediapipe = images_np[first_valid_face_idx:] if len(images_np) > first_valid_face_idx else images_np
+            mediapipe_bbox, local_frame_idx = generate_mediapipe_bboxes(
+                images_for_mediapipe,
                 enabled_class_ids=enabled_class_ids,
                 confidence_threshold=mediapipe_confidence_threshold,
                 mask_dilation=mediapipe_mask_dilation,
+                return_frame_index=True,
             )
+            if local_frame_idx >= 0:
+                mediapipe_bbox_frame_idx = first_valid_face_idx + local_frame_idx
             if not mediapipe_bbox:
                 mediapipe_bbox = [bbox_ints]
+                mediapipe_bbox_frame_idx = int(first_valid_face_idx)
 
-        return (pose_data, face_images_tensor, json.dumps(points_dict_list), [bbox_ints], face_bboxes, mediapipe_bbox)
+        return (pose_data, face_images_tensor, json.dumps(points_dict_list), [bbox_ints], face_bboxes, mediapipe_bbox, int(mediapipe_bbox_frame_idx))
 
 class DrawViTPose:
     @classmethod
@@ -278,12 +307,12 @@ class DrawViTPose:
         return {
             "required": {
                 "pose_data": ("POSEDATA",),
-                "width": ("INT", {"default": 832, "min": 64, "max": 2048, "step": 1, "tooltip": "Width of the generation"}),
-                "height": ("INT", {"default": 480, "min": 64, "max": 2048, "step": 1, "tooltip": "Height of the generation"}),
-                "retarget_padding": ("INT", {"default": 16, "min": 0, "max": 512, "step": 1, "tooltip": "When > 0, the retargeted pose image is padded and resized to the target size"}),
-                "body_stick_width": ("INT", {"default": -1, "min": -1, "max": 20, "step": 1, "tooltip": "Width of the body sticks. Set to 0 to disable body drawing, -1 for auto"}),
-                "hand_stick_width": ("INT", {"default": -1, "min": -1, "max": 20, "step": 1, "tooltip": "Width of the hand sticks. Set to 0 to disable hand drawing, -1 for auto"}),
-                "draw_head": ("BOOLEAN", {"default": "True", "tooltip": "Whether to draw head keypoints"}),
+                "width": ("INT", {"default": 832, "min": 64, "max": 2048, "step": 1, "tooltip": "生成结果的宽度。"}),
+                "height": ("INT", {"default": 480, "min": 64, "max": 2048, "step": 1, "tooltip": "生成结果的高度。"}),
+                "retarget_padding": ("INT", {"default": 16, "min": 0, "max": 512, "step": 1, "tooltip": "大于 0 时，对重定向后的姿态图进行补边并缩放到目标尺寸。"}),
+                "body_stick_width": ("INT", {"default": -1, "min": -1, "max": 20, "step": 1, "tooltip": "身体骨架线宽。设为 0 可关闭身体绘制，-1 为自动。"}),
+                "hand_stick_width": ("INT", {"default": -1, "min": -1, "max": 20, "step": 1, "tooltip": "手部骨架线宽。设为 0 可关闭手部绘制，-1 为自动。"}),
+                "draw_head": ("BOOLEAN", {"default": "True", "tooltip": "是否绘制头部关键点。"}),
             },
         }
 
@@ -398,14 +427,14 @@ class PoseDetectionOneToAllAnimation:
             "required": {
                 "model": ("POSEMODEL",),
                 "images": ("IMAGE",),
-                "width": ("INT", {"default": 832, "min": 64, "max": 2048, "step": 2, "tooltip": "Width of the generation"}),
-                "height": ("INT", {"default": 480, "min": 64, "max": 2048, "step": 2, "tooltip": "Height of the generation"}),
-                "align_to": (["ref", "pose", "none"], {"default": "ref", "tooltip": "Alignment mode for poses"}),
-                "draw_face_points": (["full", "weak", "none"], {"default": "full", "tooltip": "Whether to draw face keypoints on the pose images"}),
-                "draw_head": (["full", "weak", "none"], {"default": "full", "tooltip": "Whether to draw head keypoints on the pose images"}),
+                "width": ("INT", {"default": 832, "min": 64, "max": 2048, "step": 2, "tooltip": "生成结果的宽度。"}),
+                "height": ("INT", {"default": 480, "min": 64, "max": 2048, "step": 2, "tooltip": "生成结果的高度。"}),
+                "align_to": (["ref", "pose", "none"], {"default": "ref", "tooltip": "姿态对齐模式。"}),
+                "draw_face_points": (["full", "weak", "none"], {"default": "full", "tooltip": "是否在姿态图中绘制面部关键点。"}),
+                "draw_head": (["full", "weak", "none"], {"default": "full", "tooltip": "是否在姿态图中绘制头部关键点。"}),
             },
             "optional": {
-                "ref_image": ("IMAGE", {"default": None, "tooltip": "Optional reference image for pose retargeting"}),
+                "ref_image": ("IMAGE", {"default": None, "tooltip": "用于姿态重定向的可选参考图像。"}),
             },
         }
 

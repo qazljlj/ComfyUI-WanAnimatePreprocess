@@ -126,7 +126,13 @@ def _mask_to_bbox(mask):
     return (x1, y1, x2, y2)
 
 
-def generate_mediapipe_bboxes(images_np, enabled_class_ids, confidence_threshold=0.25, mask_dilation=0):
+def generate_mediapipe_bboxes(
+    images_np,
+    enabled_class_ids,
+    confidence_threshold=0.25,
+    mask_dilation=0,
+    return_frame_index=False,
+):
     if not enabled_class_ids:
         return []
 
@@ -135,27 +141,32 @@ def generate_mediapipe_bboxes(images_np, enabled_class_ids, confidence_threshold
     if not ordered_class_ids:
         return []
 
-    # Match the existing bbox output semantics used by the video workflow:
-    # produce a single combined prompt box from the first frame only.
-    first_image = images_np[0]
-    segmented_masks = segmenter.segment(_to_mediapipe_image(first_image))
-    merged_mask = None
+    # Keep output semantics compatible with SAM2 video workflows:
+    # return a single combined prompt box. Instead of always using frame 0,
+    # scan forward and pick the first frame that yields a non-empty merged mask.
+    for frame_idx, image in enumerate(images_np):
+        segmented_masks = segmenter.segment(_to_mediapipe_image(image))
+        merged_mask = None
 
-    for class_id in ordered_class_ids:
-        confidence_mask = segmented_masks.confidence_masks[class_id].numpy_view()
-        binary_mask = (confidence_mask > confidence_threshold).astype(np.uint8)
-        binary_mask = _ensure_2d_mask(binary_mask)
-        binary_mask = _apply_mask_dilation(binary_mask, mask_dilation)
+        for class_id in ordered_class_ids:
+            confidence_mask = segmented_masks.confidence_masks[class_id].numpy_view()
+            binary_mask = (confidence_mask > confidence_threshold).astype(np.uint8)
+            binary_mask = _ensure_2d_mask(binary_mask)
+            binary_mask = _apply_mask_dilation(binary_mask, mask_dilation)
+            if merged_mask is None:
+                merged_mask = binary_mask.astype(np.uint8)
+            else:
+                merged_mask = np.maximum(merged_mask, binary_mask.astype(np.uint8))
+
         if merged_mask is None:
-            merged_mask = binary_mask.astype(np.uint8)
-        else:
-            merged_mask = np.maximum(merged_mask, binary_mask.astype(np.uint8))
+            continue
 
-    if merged_mask is None:
-        return []
+        bbox = _mask_to_bbox(merged_mask)
+        if bbox is not None:
+            if return_frame_index:
+                return [bbox], frame_idx
+            return [bbox]
 
-    bbox = _mask_to_bbox(merged_mask)
-    if bbox is None:
-        return []
-
-    return [bbox]
+    if return_frame_index:
+        return [], -1
+    return []
